@@ -1,0 +1,55 @@
+//@version=5
+indicator("台指期震盪洗盤偵測 (TXF Choppy Detector)", overlay=true)
+
+// --- 參數設定 ---
+grp_bb = "布林通道設定"
+bb_len = input.int(20, minval=1, title="布林通道長度", group=grp_bb)
+bb_mult = input.float(2.0, minval=0.001, maxval=50, title="標準差倍數", group=grp_bb)
+
+grp_chop = "震盪指標 (CHOP) 設定"
+chop_len = input.int(14, minval=1, title="CHOP 長度", group=grp_chop)
+chop_thresh = input.float(50.0, title="震盪判定門檻 (高於此值視為盤整)", group=grp_chop)
+
+// --- 計算布林通道 ---
+[bb_middle, bb_upper, bb_lower] = ta.bb(close, bb_len, bb_mult)
+plot(bb_upper, color=color.new(color.red, 50), title="布林上軌")
+plot(bb_lower, color=color.new(color.green, 50), title="布林下軌")
+plot(bb_middle, color=color.new(color.gray, 50), title="布林中軌")
+
+// --- 計算 Choppiness Index (CHOP) ---
+// 公式: 100 * LOG10(SUM(ATR(1), length) / (MaxHi(length) - MinLo(length))) / LOG10(length)
+ci_num = math.sum(ta.atr(1), chop_len)
+ci_denom = ta.highest(chop_len) - ta.lowest(chop_len)
+ci = 100 * math.log10(ci_num / ci_denom) / math.log10(chop_len)
+
+// --- 判斷邏輯 ---
+// 1. 市場處於震盪狀態 (CHOP > 門檻)
+is_choppy = ci > chop_thresh
+
+// 2. 洗盤反轉訊號 (在震盪時，價格刺穿布林通道後收回)
+// 上洗盤 (誘多): 最高價超過上軌，但收盤價跌回上軌之下 (或收黑)
+washout_high = is_choppy and high > bb_upper and close < bb_upper
+
+// 下洗盤 (誘空): 最低價跌破下軌，但收盤價站回下軌之上 (或收紅)
+washout_low = is_choppy and low < bb_lower and close > bb_lower
+
+// --- 視覺化呈現 ---
+
+// 1. 背景顏色：當市場處於震盪模式時，背景變為灰色，提醒不要追高殺低
+bgcolor(is_choppy ? color.new(color.gray, 85) : na, title="震盪盤整區背景")
+
+// 2. 標記洗盤訊號
+plotshape(washout_high, title="頂部洗盤(做空)", style=shape.labeldown, location=location.abovebar, color=color.red, text="洗盤\n誘多", textcolor=color.white)
+plotshape(washout_low, title="底部洗盤(做多)", style=shape.labelup, location=location.belowbar, color=color.green, text="洗盤\n誘空", textcolor=color.white)
+
+// --- 警報設定 (可選) ---
+alertcondition(washout_high, title="頂部洗盤警報", message="台指期出現頂部假突破洗盤訊號！")
+alertcondition(washout_low, title="底部洗盤警報", message="台指期出現底部假跌破洗盤訊號！")
+
+// --- 資訊面板 (右下角) ---
+var table panel = table.new(position.bottom_right, 2, 2)
+if barstate.islast
+    table.cell(panel, 0, 0, "當前狀態", bgcolor=color.gray, text_color=color.white)
+    table.cell(panel, 1, 0, is_choppy ? "震盪洗盤中" : "趨勢運行中", bgcolor=is_choppy ? color.yellow : color.blue, text_color=color.black)
+    table.cell(panel, 0, 1, "CHOP數值", bgcolor=color.gray, text_color=color.white)
+    table.cell(panel, 1, 1, str.tostring(ci, "#.##"), bgcolor=color.black, text_color=color.white)
